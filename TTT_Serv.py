@@ -7,7 +7,10 @@ user_db = {"Alfredo": "aaa",
         "Itzel": "ddd",
         "Elias": "eee"}
 
+logged_in_users = []
+
 def handle_client(client_socket):
+    global logged_in_users
     while True:
         try:
             credentials = client_socket.recv(1024).decode('utf-8')
@@ -15,7 +18,9 @@ def handle_client(client_socket):
                 break
             user, password = credentials.split(',')
             if user in user_db and user_db[user] == password:
-                client_socket.send("Autenticación exitosa".encode('utf-8'))
+                if user not in logged_in_users:
+                    logged_in_users.append(user)
+                client_socket.send(f"Autenticación exitosa,{','.join(logged_in_users)}".encode('utf-8'))
             else:
                 client_socket.send("Error de autenticación".encode('utf-8'))
         except():

@@ -1,28 +1,28 @@
 import socket 
-import tkinter as tk
+import tkinter as tk 
 from tkinter import messagebox
-from tkinter import PhotoImage
 
 def authenticate():
-    #Obtener los valores ingresados
+    # Obtener los valores ingresados
     username = entry_username.get()
     password = entry_password.get()
 
     if username and password:
         try:
-            #Crear socket del cliente
+            # Crear socket del cliente
             client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client.connect(('localhost', 9999))
 
-            #Enviar usuario y contraseña
+            # Enviar usuario y contraseña
             credentials = f"{username},{password}"
             client.send(credentials.encode('utf-8'))
 
-            #Recibir respuesta del servidor
+            # Recibir respuesta del servidor
             response = client.recv(1024).decode('utf-8')
             print(response)
-            if response == "Autenticación exitosa":
-                open_waiting_room()
+            if response.startswith("Autenticación exitosa"):
+                logged_in_users = response.split(',')[1:]
+                open_waiting_room(logged_in_users)
             else:
                 messagebox.showinfo("Resultado", response)
         except Exception as e:
@@ -30,7 +30,14 @@ def authenticate():
     else:
         messagebox.showwarning("Advertencia", "Por favor, ingrese ususario y contraseña.")
 
-def open_waiting_room():
+def open_user_window(user):
+    user_window = tk.Toplevel(window)
+    user_window.title(f"Información de {user}")
+    user_window.configure(bg='#D8BFD8')
+    label_user_info = tk.Label(user_window, text=f"Información del usuario: {user}", bg="#D8BFD8", fg="white", font=("Arial", 15))
+    label_user_info.pack(pady=20)
+
+def open_waiting_room(logged_in_users):
     # Crear una nueva ventana para la sala de espera
     waiting_room = tk.Toplevel(window)
     waiting_room.title("Sala de Espera")
@@ -39,7 +46,16 @@ def open_waiting_room():
     label_waiting = tk.Label(waiting_room, text="Esperando a otros jugadores...", bg="#D8BFD8", fg="white", font=("Arial", 20))
     label_waiting.pack(pady=20)
 
-    # Aquí puedes agregar más widgets o lógica para la sala de espera
+    # Mostrar usuarios logueados
+    label_users = tk.Label(waiting_room, text="Usuarios logueados:", bg="#D8BFD8", fg="white", font=("Arial", 15))
+    label_users.pack(pady=10)
+    for user in logged_in_users:
+        frame_user = tk.Frame(waiting_room, bg="#D8BFD8")
+        frame_user.pack(pady=5)
+        label_user = tk.Label(frame_user, text=user, bg="#D8BFD8", fg="white", font=("Arial", 12))
+        label_user.pack(side=tk.LEFT)
+        button_user = tk.Button(frame_user, text="Ver", command=lambda u=user: open_user_window(u))
+        button_user.pack(side=tk.LEFT)
 
 # Crear la ventana principal
 window = tk.Tk()
@@ -72,5 +88,3 @@ button_login.pack(pady=20)
 
 # Iniciar el bucle principal de la interfaz gráfica
 window.mainloop()
-
-#To do: Ventana del tiktaktoe
