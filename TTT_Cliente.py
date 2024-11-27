@@ -27,17 +27,17 @@ def open_waiting_room(logged_in_users, username):
                 text="Retar", 
                 bg="#C99AF5", 
                 font=(font_tlt, 12),
-                command=lambda u=user: start_game(u, username, waiting_room)  # Pasa el oponente y usuario
+                command=lambda u=user: start_game(u, username, waiting_room, logged_in_users)  # Pasa el oponente y usuario
             )
             button_challenge.pack(side=tk.LEFT, padx=10)
 
-def start_game(opponent, username, waiting_room):
+def start_game(opponent, username, waiting_room, logged_in_users):
     # Cerrar la sala de espera
     waiting_room.destroy()
     # Abrir la ventana del gato con el usuario actual y el oponente seleccionado
-    open_cat_window(username, opponent)
+    open_cat_window(username, opponent, logged_in_users)
 
-def open_cat_window(username, opponent):
+def open_cat_window(username, opponent, logged_in_users):
     # Crear una nueva ventana para el gato
     cat_window = tk.Toplevel(window)
     cat_window.title("Juego del Gato")
@@ -48,6 +48,7 @@ def open_cat_window(username, opponent):
 
     # Variables de turno
     current_turn = tk.StringVar(value=username)  # Turno inicial es del usuario que inició sesión
+    turn_symbol = tk.StringVar(value="X")  # Comienza con "X"
 
     # Cabecera de turnos
     label_turn = tk.Label(cat_window, textvariable=current_turn, font=(font_tlt, 20), bg="#D8BFD8")
@@ -71,13 +72,28 @@ def open_cat_window(username, opponent):
     board_frame.pack(pady=20)
     
     board_buttons = []
+    
+    # Función para reiniciar el tablero
+    def reset_game():
+        turn_symbol.set("X")
+        current_turn.set(username)
+        for row in board_buttons:
+            for button in row:
+                button.config(text="", state=tk.NORMAL)
+
     def button_click(i, j):
         # Verificar si el cuadro está vacío y asignar el turno actual
         if board_buttons[i][j]["text"] == "":
-            board_buttons[i][j]["text"] = "X" if current_turn.get() == username else "O"
-            # Cambiar el turno
-            next_turn = opponent if current_turn.get() == username else username
-            current_turn.set(f"Turno de: {next_turn}")
+            # Asignar el símbolo correspondiente
+            board_buttons[i][j]["text"] = turn_symbol.get()
+            board_buttons[i][j].config(state=tk.DISABLED)  # Deshabilitar el botón tras ser seleccionado
+            # Cambiar el turno al siguiente jugador
+            if turn_symbol.get() == "X":
+                turn_symbol.set("O")
+                current_turn.set(f"Turno de: {opponent}")
+            else:
+                turn_symbol.set("X")
+                current_turn.set(f"Turno de: {username}")
 
     for i in range(3):
         row = []
@@ -95,15 +111,20 @@ def open_cat_window(username, opponent):
     label_winner = tk.Label(cat_window, text="", font=(font_tlt, 20), bg="#D8BFD8")
     label_winner.pack(pady=10)
 
-    # Botones para acciones (Jugar de nuevo y Salir)
+    # Botones para acciones (Jugar de nuevo, Salir y Regresar a la sala de espera)
     action_frame = tk.Frame(cat_window, bg="#D8BFD8")
     action_frame.pack(pady=10)
 
-    button_restart = tk.Button(action_frame, text="Jugar de nuevo", font=(font_tlt, 15), bg="#C99AF5", command=lambda: print("Reiniciar juego"))
+    button_restart = tk.Button(action_frame, text="Jugar de nuevo", font=(font_tlt, 15), bg="#C99AF5", command=reset_game)
     button_restart.pack(side=tk.LEFT, padx=10)
     
-    button_exit = tk.Button(action_frame, text="Salir", font=(font_tlt, 15), bg="#A575CC", command=cat_window.destroy)
+    button_exit = tk.Button(action_frame, text="Salir", font=(font_tlt, 15), bg="#C99AF5", command=cat_window.destroy)
     button_exit.pack(side=tk.LEFT, padx=10)
+    
+    # Botón para regresar a la sala de espera
+    button_back_to_waiting = tk.Button(action_frame, text="Sala de espera", font=(font_tlt, 14), bg="#C99AF5",
+                                       command=lambda: (cat_window.destroy(), open_waiting_room(logged_in_users, username)))
+    button_back_to_waiting.pack(side=tk.LEFT, padx=10)
 
 def authenticate():
     # Obtener los valores ingresados
