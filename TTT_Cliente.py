@@ -1,8 +1,9 @@
 import socket
+import threading
 import tkinter as tk
 from tkinter import messagebox
 
-def open_waiting_room(logged_in_users, username):
+def open_waiting_room(logged_in_users, username, client_socket):
     # Crear una nueva ventana para la sala de espera
     waiting_room = tk.Toplevel(window)
     waiting_room.title("Sala de Espera")
@@ -27,17 +28,49 @@ def open_waiting_room(logged_in_users, username):
                 text="Retar", 
                 bg="#C99AF5", 
                 font=(font_tlt, 12),
-                command=lambda u=user: start_game(u, username, waiting_room, logged_in_users)  # Pasa el oponente y usuario
+                command=lambda u=user: send_challenge(u, client_socket)
             )
             button_challenge.pack(side=tk.LEFT, padx=10)
 
-def start_game(opponent, username, waiting_room, logged_in_users):
-    # Cerrar la sala de espera
-    waiting_room.destroy()
-    # Abrir la ventana del gato con el usuario actual y el oponente seleccionado
-    open_cat_window(username, opponent, logged_in_users)
+    # Hilo para recibir mensajes en la sala de espera
+    def listen_for_messages():
+        while True:
+            try:
+                message = client_socket.recv(1024).decode('utf-8')
+                if message.startswith("CHALLENGE"):
+                    _, challenger = message.split(',')
+                    response = messagebox.askyesno("Desafío", f"{challenger} te ha retado. ¿Aceptar?")
+                    if response:
+                        client_socket.send(f"ACCEPT,{challenger}".encode('utf-8'))
+                        # Abrir el tablero de juego para el retado
+                        waiting_room.destroy()
+                        open_cat_window(username, challenger, client_socket, is_challenger=False)
+                        break  # Salir del bucle después de aceptar
+                    else:
+                        client_socket.send(f"DECLINE,{challenger}".encode('utf-8'))
+                elif message.startswith("ACCEPT"):
+                    _, opponent = message.split(',')
+                    messagebox.showinfo("Desafío aceptado", f"{opponent} ha aceptado tu desafío.")
+                    waiting_room.destroy()
+                    # Abrir el tablero de juego para el retador
+                    open_cat_window(username, opponent, client_socket, is_challenger=True)
+                    break  # Salir del bucle después de iniciar el juego
+                elif message.startswith("DECLINE"):
+                    _, opponent = message.split(',')
+                    messagebox.showinfo("Desafío rechazado", f"{opponent} ha rechazado tu desafío.")
+                elif message.startswith("UPDATE_USERS"):
+                    # Actualizar lista de usuarios (esto la verdad es opcional)
+                    pass
+            except Exception as e:
+                print(f"Error en sala de espera: {e}")
+                break
 
-def open_cat_window(username, opponent, logged_in_users):
+    threading.Thread(target=listen_for_messages, daemon=True).start()
+
+def send_challenge(opponent, client_socket):
+    client_socket.send(f"CHALLENGE,{opponent}".encode('utf-8'))
+
+def open_cat_window(username, opponent, client_socket, is_challenger):
     # Crear una nueva ventana para el gato
     cat_window = tk.Toplevel(window)
     cat_window.title("Juego del Gato")
@@ -47,8 +80,15 @@ def open_cat_window(username, opponent, logged_in_users):
     font_tlt = "Indie Flower"
 
     # Variables de turno
-    current_turn = tk.StringVar(value=username)  # Turno inicial es del usuario que inició sesión
-    turn_symbol = tk.StringVar(value="X")  # Comienza con "X"
+    current_turn = tk.StringVar()
+    turn_symbol = tk.StringVar()
+    game_over = tk.BooleanVar(value=False)
+
+    # Semáforo para controlar el turno
+    turn_semaphore = threading.Semaphore(0)  # Inicia bloqueado hasta que sea el turno del jugador
+
+    # Lock para sincronizar el acceso al tablero
+    board_lock = threading.Lock()
 
     # Cabecera de turnos
     label_turn = tk.Label(cat_window, textvariable=current_turn, font=(font_tlt, 20), bg="#D8BFD8")
@@ -72,28 +112,78 @@ def open_cat_window(username, opponent, logged_in_users):
     board_frame.pack(pady=20)
     
     board_buttons = []
-    
+    board = ['' for _ in range(9)]  # Representación del tablero
+
     # Función para reiniciar el tablero
     def reset_game():
-        turn_symbol.set("X")
-        current_turn.set(username)
+        # Determinar el símbolo y el turno según si es el retador o el retado
+        if is_challenger:
+            turn_symbol.set("X")
+        else:
+            turn_symbol.set("O")
+        current_turn.set(f"Turno de: {username if turn_symbol.get() == 'X' else opponent}")
+        for i in range(9):
+            board[i] = ''
         for row in board_buttons:
             for button in row:
                 button.config(text="", state=tk.NORMAL)
+        game_over.set(False)
+        if turn_symbol.get() == 'X':
+            turn_semaphore.release()
+        else:
+            pass  # Esperar al oponente
+
+    # Inicializar símbolos y turnos
+    if is_challenger:
+        turn_symbol.set("X")
+    else:
+        turn_symbol.set("O")
+    current_turn.set(f"Turno de: {username if turn_symbol.get() == 'X' else opponent}")
+    if turn_symbol.get() == 'X':
+        turn_semaphore.release()
+    else:
+        pass  # Esperar al oponente
 
     def button_click(i, j):
-        # Verificar si el cuadro está vacío y asignar el turno actual
-        if board_buttons[i][j]["text"] == "":
-            # Asignar el símbolo correspondiente
-            board_buttons[i][j]["text"] = turn_symbol.get()
-            board_buttons[i][j].config(state=tk.DISABLED)  # Deshabilitar el botón tras ser seleccionado
-            # Cambiar el turno al siguiente jugador
-            if turn_symbol.get() == "X":
-                turn_symbol.set("O")
-                current_turn.set(f"Turno de: {opponent}")
-            else:
-                turn_symbol.set("X")
-                current_turn.set(f"Turno de: {username}")
+        position = i * 3 + j
+        with board_lock:
+            if board[position] == '' and not game_over.get():
+                board[position] = turn_symbol.get()
+                board_buttons[i][j]["text"] = turn_symbol.get()
+                board_buttons[i][j].config(state=tk.DISABLED)
+                # Enviar movimiento al servidor
+                client_socket.send(f"MOVE,{position}".encode('utf-8'))
+                # Deshabilitar el tablero hasta el próximo turno
+                disable_board()
+                # Verificar si hay un ganador
+                winner = check_winner()
+                if winner:
+                    label_winner.config(text=f"¡{winner} ha ganado!")
+                    game_over.set(True)
+                else:
+                    current_turn.set(f"Turno de: {opponent}")
+
+    def disable_board():
+        for row in board_buttons:
+            for button in row:
+                button.config(state=tk.DISABLED)
+
+    def enable_board():
+        for i in range(9):
+            if board[i] == '':
+                board_buttons[i//3][i%3].config(state=tk.NORMAL)
+
+    def check_winner():
+        # Combinaciones ganadoras
+        win_conditions = [(0,1,2),(3,4,5),(6,7,8),
+                          (0,3,6),(1,4,7),(2,5,8),
+                          (0,4,8),(2,4,6)]
+        for a,b,c in win_conditions:
+            if board[a] == board[b] == board[c] != '':
+                return board[a]
+        if '' not in board:
+            return 'Empate'
+        return None
 
     for i in range(3):
         row = []
@@ -101,9 +191,10 @@ def open_cat_window(username, opponent, logged_in_users):
             button = tk.Button(
                 board_frame, text="", font=(font_tlt, 20),
                 width=5, height=2, bg="#D3A4F5",
-                command=lambda x=i, y=j: button_click(x, y)
+                command=lambda x=i, y=j: (turn_semaphore.acquire(), button_click(x, y))
             )
             button.grid(row=i, column=j, padx=5, pady=5)
+            button.config(state=tk.DISABLED)
             row.append(button)
         board_buttons.append(row)
     
@@ -111,20 +202,51 @@ def open_cat_window(username, opponent, logged_in_users):
     label_winner = tk.Label(cat_window, text="", font=(font_tlt, 20), bg="#D8BFD8")
     label_winner.pack(pady=10)
 
-    # Botones para acciones (Jugar de nuevo, Salir y Regresar a la sala de espera)
+    # Botones para acciones (Jugar de nuevo, Salir)
     action_frame = tk.Frame(cat_window, bg="#D8BFD8")
     action_frame.pack(pady=10)
 
     button_restart = tk.Button(action_frame, text="Jugar de nuevo", font=(font_tlt, 15), bg="#C99AF5", command=reset_game)
     button_restart.pack(side=tk.LEFT, padx=10)
     
-    button_exit = tk.Button(action_frame, text="Salir", font=(font_tlt, 15), bg="#C99AF5", command=cat_window.destroy)
+    button_exit = tk.Button(action_frame, text="Salir", font=(font_tlt, 15), bg="#C99AF5", command=lambda: exit_game(cat_window, client_socket))
     button_exit.pack(side=tk.LEFT, padx=10)
     
-    # Botón para regresar a la sala de espera
-    button_back_to_waiting = tk.Button(action_frame, text="Sala de espera", font=(font_tlt, 14), bg="#C99AF5",
-                                       command=lambda: (cat_window.destroy(), open_waiting_room(logged_in_users, username)))
-    button_back_to_waiting.pack(side=tk.LEFT, padx=10)
+    def exit_game(window, client_socket):
+        client_socket.send("EXIT_GAME".encode('utf-8'))
+        window.destroy()
+
+    # Hilo para recibir movimientos del oponente
+    def listen_for_moves():
+        while True:
+            try:
+                message = client_socket.recv(1024).decode('utf-8')
+                if message.startswith("MOVE"):
+                    _, position = message.split(',')
+                    position = int(position)
+                    symbol = 'O' if turn_symbol.get() == 'X' else 'X'
+                    with board_lock:
+                        board[position] = symbol
+                        board_buttons[position//3][position%3]["text"] = symbol
+                        board_buttons[position//3][position%3].config(state=tk.DISABLED)
+                    winner = check_winner()
+                    if winner:
+                        label_winner.config(text=f"¡{winner} ha ganado!")
+                        game_over.set(True)
+                    else:
+                        # Es nuestro turno
+                        current_turn.set(f"Turno de: {username}")
+                        enable_board()
+                        turn_semaphore.release()
+                elif message == "GAME_ENDED":
+                    messagebox.showinfo("Juego terminado", "El oponente ha salido del juego.")
+                    cat_window.destroy()
+                    break
+            except Exception as e:
+                print(f"Error recibiendo movimientos: {e}")
+                break
+
+    threading.Thread(target=listen_for_moves, daemon=True).start()
 
 def authenticate():
     # Obtener los valores ingresados
@@ -134,19 +256,19 @@ def authenticate():
     if username and password:
         try:
             # Crear socket del cliente
-            client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client.connect(('localhost', 9999))
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client_socket.connect(('localhost', 9999))
 
             # Enviar usuario y contraseña
             credentials = f"{username},{password}"
-            client.send(credentials.encode('utf-8'))
+            client_socket.send(credentials.encode('utf-8'))
 
             # Recibir respuesta del servidor
-            response = client.recv(1024).decode('utf-8')
+            response = client_socket.recv(1024).decode('utf-8')
             print(response)
             if response.startswith("Autenticación exitosa"):
                 logged_in_users = response.split(',')[1:]
-                open_waiting_room(logged_in_users, username)  # Abrir la sala de espera
+                open_waiting_room(logged_in_users, username, client_socket)  # Abrir la sala de espera
             else:
                 messagebox.showinfo("Resultado", response)
         except Exception as e:
