@@ -174,7 +174,6 @@ def open_cat_window(username, opponent, client_socket, is_challenger):
                 button.config(text="", state=tk.NORMAL)
 
         game_over.set(False)
-        button_restart.config(state=tk.DISABLED)
 
         if is_challenger:
             turn_symbol.set("X")
@@ -184,21 +183,39 @@ def open_cat_window(username, opponent, client_socket, is_challenger):
             turn_symbol.set("O")
             current_turn.set(f"Turno de: {opponent}")
 
+        # El marcador permanece sin cambios
+        label_score.config(text=f"{scores[username]}-{scores[opponent]}")
+
+
     # Función para anunciar al ganador
     def announce_winner(winner):
         disable_board()
         if winner == "Empate":
             label_turn.config(text="¡Empate!")
         else:
-            label_turn.config(text=f"¡{winner} ha ganado!")
+            label_turn.config(text=f"¡{winner} ha ganado esta ronda!")
 
-        if winner == username:
-            scores[username] += 1
-        elif winner == opponent:
-            scores[opponent] += 1
+            if winner == username:
+                scores[username] += 1
+            elif winner == opponent:
+                scores[opponent] += 1
 
-        label_score.config(text=f"{scores[username]}-{scores[opponent]}")
-        button_restart.config(state=tk.NORMAL)
+            # Actualiza el marcador visual
+            label_score.config(text=f"{scores[username]}-{scores[opponent]}")
+
+        # Verifica si alguien alcanzó 3 puntos
+        if scores[username] == 3:
+            messagebox.showinfo("Juego terminado", f"¡Felicidades {username}, ganaste el juego!")
+            client_socket.send("GAME_OVER".encode('utf-8'))
+            cat_window.destroy()
+        elif scores[opponent] == 3:
+            messagebox.showinfo("Juego terminado", f"¡{opponent} ganó el juego!")
+            client_socket.send("GAME_OVER".encode('utf-8'))
+            cat_window.destroy()
+        else:
+            # Reinicia el juego para la próxima ronda
+            reset_game()
+
 
     # Crear el tablero
     board = ['' for _ in range(9)]
@@ -243,16 +260,6 @@ def open_cat_window(username, opponent, client_socket, is_challenger):
     action_frame = tk.Frame(cat_window, bg="#D8BFD8")
     action_frame.pack(pady=10)
 
-    button_restart = tk.Button(
-        action_frame,
-        text="Jugar de nuevo",
-        font=(font_tlt, 15),
-        bg="#C99AF5",
-        state=tk.DISABLED,
-        command=reset_game
-    )
-    button_restart.pack(side=tk.LEFT, padx=10)
-
     # Hilo para escuchar movimientos
     def listen_for_moves():
         while True:
@@ -280,13 +287,21 @@ def open_cat_window(username, opponent, client_socket, is_challenger):
                         enable_board()
                         turn_semaphore.acquire()
 
-                elif message == "GAME_ENDED":
-                    messagebox.showinfo("Juego terminado", "El oponente ha salido del juego.")
+                elif message.startswith("SCORE"):
+                    _, score = message.split(',')
+                    label_score.config(text=score)  # Actualiza el marcador en la interfaz
+
+                elif message.startswith("GAME_OVER"):
+                    _, score = message.split(',')
+                    messagebox.showinfo("Juego terminado", f"El juego ha terminado. Marcador final: {score}")
                     cat_window.destroy()
                     break
+
             except Exception as e:
                 print(f"Error recibiendo movimientos: {e}")
                 break
+
+
 
     threading.Thread(target=listen_for_moves, daemon=True).start()
     reset_game()
@@ -339,4 +354,4 @@ entry_password.pack(pady=5)
 button_login = tk.Button(window, text="Iniciar", command=authenticate, font=(font_tlt, 30))
 button_login.pack(pady=20)
 
-window.mainloop()
+window.mainloop() 

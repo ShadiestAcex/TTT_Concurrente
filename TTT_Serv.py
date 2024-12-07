@@ -9,6 +9,7 @@ user_db = {"Alfredo": "aaa",
 
 logged_in_users = {}
 active_games = {}  # Diccionario para rastrear juegos activos
+scores = {}  # Inicializa en la parte superior del archivo
 
 lock = threading.Lock()
 
@@ -52,6 +53,12 @@ def handle_client(client_socket, username):
                             game_id = f"{challenger}_{username}"
                             active_games[challenger] = game_id
                             active_games[username] = game_id
+                            
+                            if username not in scores:
+                                scores[username] = 0
+                            if opponent not in scores:
+                                scores[opponent] = 0
+
                         except Exception as e:
                             print(f"Error notificando al desafiante: {e}")
                             client_socket.send("CHALLENGER_OFFLINE".encode('utf-8'))
@@ -71,16 +78,35 @@ def handle_client(client_socket, username):
             elif data.startswith("MOVE"):
                 _, position = data.split(',')
                 game_id = active_games.get(username)
+
                 if game_id:
                     players = game_id.split('_')
                     opponent = players[0] if players[1] == username else players[1]
+
                     with lock:
                         if opponent in logged_in_users:
                             try:
+                                # Enviar movimiento al oponente
                                 opponent_socket = logged_in_users[opponent]
                                 opponent_socket.send(f"MOVE,{position}".encode('utf-8'))
                                 client_socket.send("ACK".encode('utf-8'))
                                 print(f"{username} realizó un movimiento en posición {position}")
+
+                                # Verificar si alguien alcanzó 3 puntos
+                                if scores.get(username, 0) == 3 or scores.get(opponent, 0) == 3:
+                                    # Notificar a ambos jugadores que el juego terminó
+                                    client_socket.send(f"GAME_OVER,{scores[username]}-{scores[opponent]}".encode('utf-8'))
+                                    opponent_socket.send(f"GAME_OVER,{scores[opponent]}-{scores[username]}".encode('utf-8'))
+                                    # Eliminar juego activo
+                                    del active_games[username]
+                                    del active_games[opponent]
+                                    print(f"Juego terminado. {username}: {scores[username]} vs {opponent}: {scores[opponent]}")
+
+                                else:
+                                    # Enviar marcador actualizado
+                                    client_socket.send(f"SCORE,{scores[username]}-{scores[opponent]}".encode('utf-8'))
+                                    opponent_socket.send(f"SCORE,{scores[opponent]}-{scores[username]}".encode('utf-8'))
+
                             except Exception as e:
                                 print(f"Error enviando movimiento a {opponent}: {e}")
                                 client_socket.send("ERROR_SENDING_MOVE".encode('utf-8'))
@@ -88,6 +114,24 @@ def handle_client(client_socket, username):
                             client_socket.send("OPPONENT_DISCONNECTED".encode('utf-8'))
                 else:
                     client_socket.send("NO_ACTIVE_GAME".encode('utf-8'))
+
+   
+            elif data == "GAME_OVER":
+                game_id = active_games.get(username)
+                if game_id:
+                    players = game_id.split('_')
+                    opponent = players[0] if players[1] == username else players[1]
+                    with lock:
+                        if opponent in logged_in_users:
+                            try:
+                                opponent_socket = logged_in_users[opponent]
+                                opponent_socket.send("GAME_OVER".encode('utf-8'))
+                            except Exception as e:
+                                print(f"Error notificando al oponente sobre GAME_OVER: {e}")
+                        # Elimina el juego activo
+                        del active_games[username]
+                        del active_games[opponent]
+                        print(f"Juego {game_id} terminado. {username} ganó.")
 
             # Salida del cliente
             elif data == "EXIT":
