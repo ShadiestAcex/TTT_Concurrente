@@ -89,13 +89,13 @@ def open_waiting_room(logged_in_users, username, client_socket):
 
         print("Conexión cerrada.")
 
-
     # Iniciar hilo para escuchar mensajes
     threading.Thread(target=listen_for_messages, daemon=True).start()
 
 
 def send_challenge(opponent, client_socket):
     client_socket.send(f"CHALLENGE,{opponent}".encode('utf-8'))
+
 
 def open_cat_window(username, opponent, client_socket, is_challenger):
     # Crear una nueva ventana para el juego
@@ -106,56 +106,15 @@ def open_cat_window(username, opponent, client_socket, is_challenger):
 
     font_tlt = "Indie Flower"
 
-    # Variables de turno
+    # Variables de turno y estado del juego
     current_turn = tk.StringVar()
     turn_symbol = tk.StringVar()
     game_over = tk.BooleanVar(value=False)
     board_lock = threading.Lock()
     turn_semaphore = threading.Semaphore(0)
+    scores = {username: 0, opponent: 0}  # Puntaje inicial
 
-    # Cabecera de turnos
-    label_turn = tk.Label(cat_window, textvariable=current_turn, font=(font_tlt, 20), bg="#D8BFD8")
-    label_turn.pack(pady=10)
-
-    # Puntaje (izquierda - derecha)
-    score_frame = tk.Frame(cat_window, bg="#D8BFD8")
-    score_frame.pack(pady=10)
-
-    label_player1 = tk.Label(score_frame, text=f"{username}", font=(font_tlt, 18), bg="#D8BFD8")
-    label_player1.pack(side=tk.LEFT, padx=20)
-
-    label_score = tk.Label(score_frame, text="0-0", font=(font_tlt, 18), bg="#D8BFD8")  # Puntaje inicial
-    label_score.pack(side=tk.LEFT, padx=20)
-
-    label_player2 = tk.Label(score_frame, text=f"{opponent}", font=(font_tlt, 18), bg="#D8BFD8")
-    label_player2.pack(side=tk.LEFT, padx=20)
-
-    # Tablero del gato (grid de botones)
-    board_frame = tk.Frame(cat_window, bg="#D8BFD8")
-    board_frame.pack(pady=20)
-
-    board_buttons = []
-    board = ['' for _ in range(9)]  # Representación del tablero
-
-    
-    def reset_game(auto_reset=False):
-        # Determinar el símbolo y el turno según si es el retador o el retado
-        if is_challenger:
-            turn_symbol.set("X")
-        else:
-            turn_symbol.set("O")
-        current_turn.set(f"Turno de: {username if turn_symbol.get() == 'X' else opponent}")
-        for i in range(9):
-            board[i] = ''
-        for row in board_buttons:
-            for button in row:
-                button.config(text="", state=tk.NORMAL)
-        game_over.set(False)
-        if not auto_reset:
-            client_socket.send("RESET_GAME".encode('utf-8'))
-        if turn_symbol.get() == 'X':
-            turn_semaphore.release()
-
+    # Función para manejar el clic de los botones del tablero
     def button_click(i, j):
         position = i * 3 + j
         with board_lock:
@@ -175,34 +134,78 @@ def open_cat_window(username, opponent, client_socket, is_challenger):
                 winner = check_winner()
                 if winner:
                     game_over.set(True)
-                    label_turn.config(text=f"¡{winner} ha ganado!")
+                    announce_winner(winner)
                     client_socket.send("GAME_ENDED".encode('utf-8'))
                 elif '' not in board:
                     game_over.set(True)
-                    label_turn.config(text="¡Empate!")
+                    announce_winner("Empate")
                     client_socket.send("GAME_ENDED".encode('utf-8'))
                 else:
                     # Pasar el turno al oponente
                     current_turn.set(f"Turno de: {opponent}")
                     turn_semaphore.release()
 
-
+    # Función para deshabilitar el tablero
     def disable_board():
         for row in board_buttons:
             for button in row:
                 button.config(state=tk.DISABLED)
 
+    # Función para habilitar el tablero
     def enable_board():
         for i in range(9):
             if board[i] == '':
                 board_buttons[i // 3][i % 3].config(state=tk.NORMAL)
 
+    # Función para verificar al ganador
     def check_winner():
         win_conditions = [(0, 1, 2), (3, 4, 5), (6, 7, 8), (0, 3, 6), (1, 4, 7), (2, 5, 8), (0, 4, 8), (2, 4, 6)]
         for a, b, c in win_conditions:
             if board[a] == board[b] == board[c] != '':
                 return board[a]
         return None
+
+    # Función para reiniciar el juego
+    def reset_game():
+        for i in range(9):
+            board[i] = ''
+        for row in board_buttons:
+            for button in row:
+                button.config(text="", state=tk.NORMAL)
+
+        game_over.set(False)
+        button_restart.config(state=tk.DISABLED)
+
+        if is_challenger:
+            turn_symbol.set("X")
+            current_turn.set(f"Turno de: {username}")
+            turn_semaphore.release()
+        else:
+            turn_symbol.set("O")
+            current_turn.set(f"Turno de: {opponent}")
+
+    # Función para anunciar al ganador
+    def announce_winner(winner):
+        disable_board()
+        if winner == "Empate":
+            label_turn.config(text="¡Empate!")
+        else:
+            label_turn.config(text=f"¡{winner} ha ganado!")
+
+        if winner == username:
+            scores[username] += 1
+        elif winner == opponent:
+            scores[opponent] += 1
+
+        label_score.config(text=f"{scores[username]}-{scores[opponent]}")
+        button_restart.config(state=tk.NORMAL)
+
+    # Crear el tablero
+    board = ['' for _ in range(9)]
+    board_buttons = []
+
+    board_frame = tk.Frame(cat_window, bg="#D8BFD8")
+    board_frame.pack(pady=20)
 
     for i in range(3):
         row = []
@@ -218,7 +221,39 @@ def open_cat_window(username, opponent, client_socket, is_challenger):
             button.grid(row=i, column=j, padx=5, pady=5)
             row.append(button)
         board_buttons.append(row)
-    
+
+    # Crear encabezado de turno
+    label_turn = tk.Label(cat_window, textvariable=current_turn, font=(font_tlt, 20), bg="#D8BFD8")
+    label_turn.pack(pady=10)
+
+    # Crear marco de puntaje
+    score_frame = tk.Frame(cat_window, bg="#D8BFD8")
+    score_frame.pack(pady=10)
+
+    label_player1 = tk.Label(score_frame, text=f"{username}", font=(font_tlt, 18), bg="#D8BFD8")
+    label_player1.pack(side=tk.LEFT, padx=20)
+
+    label_score = tk.Label(score_frame, text="0-0", font=(font_tlt, 18), bg="#D8BFD8")
+    label_score.pack(side=tk.LEFT, padx=20)
+
+    label_player2 = tk.Label(score_frame, text=f"{opponent}", font=(font_tlt, 18), bg="#D8BFD8")
+    label_player2.pack(side=tk.LEFT, padx=20)
+
+    # Crear marco de acciones
+    action_frame = tk.Frame(cat_window, bg="#D8BFD8")
+    action_frame.pack(pady=10)
+
+    button_restart = tk.Button(
+        action_frame,
+        text="Jugar de nuevo",
+        font=(font_tlt, 15),
+        bg="#C99AF5",
+        state=tk.DISABLED,
+        command=reset_game
+    )
+    button_restart.pack(side=tk.LEFT, padx=10)
+
+    # Hilo para escuchar movimientos
     def listen_for_moves():
         while True:
             try:
@@ -227,24 +262,20 @@ def open_cat_window(username, opponent, client_socket, is_challenger):
                     _, position = message.split(',')
                     position = int(position)
 
-                    # Determinar el símbolo del oponente
                     symbol = 'O' if turn_symbol.get() == 'X' else 'X'
 
-                    # Actualizar el tablero con el movimiento del oponente
                     with board_lock:
                         board[position] = symbol
                         board_buttons[position // 3][position % 3].config(text=symbol, state=tk.DISABLED)
 
-                    # Verificar si el oponente ganó
                     winner = check_winner()
                     if winner:
                         game_over.set(True)
-                        label_turn.config(text=f"¡{winner} ha ganado!")
+                        announce_winner(winner)
                     elif '' not in board:
                         game_over.set(True)
-                        label_turn.config(text="¡Empate!")
+                        announce_winner("Empate")
                     else:
-                        # Es nuestro turno
                         current_turn.set(f"Turno de: {username}")
                         enable_board()
                         turn_semaphore.acquire()
@@ -256,9 +287,10 @@ def open_cat_window(username, opponent, client_socket, is_challenger):
             except Exception as e:
                 print(f"Error recibiendo movimientos: {e}")
                 break
-              
+
     threading.Thread(target=listen_for_moves, daemon=True).start()
-    reset_game(auto_reset=True)
+    reset_game()
+
 
 def authenticate():
     username = entry_username.get()
@@ -281,14 +313,14 @@ def authenticate():
     else:
         messagebox.showwarning("Advertencia", "Por favor, ingrese usuario y contraseña.")
 
-# Crear la ventana principal
+
+# Ventana principal
 window = tk.Tk()
 window.title("Autenticación")
 window.configure(bg='#D45DE1')
 
 font_tlt = "Indie Flower"
 
-# Crear otros widgets encima del fondo
 label_texto = tk.Label(window, text="TIK-TAK-TOE", fg="white", bg="#D45DE1", font=(font_tlt, 60))
 label_texto.pack(pady=5)
 label_texto1 = tk.Label(window, text="UPP", fg="white", bg="#D45DE1", font=(font_tlt, 60))
@@ -304,7 +336,6 @@ label_password.pack(pady=5)
 entry_password = tk.Entry(window, show="*")
 entry_password.pack(pady=5)
 
-# Botón para autenticar
 button_login = tk.Button(window, text="Iniciar", command=authenticate, font=(font_tlt, 30))
 button_login.pack(pady=20)
 
