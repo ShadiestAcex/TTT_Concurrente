@@ -300,7 +300,7 @@ def authenticate():
     if username and password:
         try:
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client_socket.connect(('192.168.1.100', 9999))  # Reemplaza con la IP del servidor
+            client_socket.connect(('localhost', 9999))  # Reemplaza con la IP del servidor
             client_socket.send(f"{username},{password}".encode('utf-8'))
             response = client_socket.recv(1024).decode('utf-8')
             if response.startswith("Autenticación exitosa"):

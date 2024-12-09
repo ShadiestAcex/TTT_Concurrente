@@ -1,6 +1,5 @@
 import socket
 import threading
-import time
 
 user_db = {
     "Alfredo": "aaa",
