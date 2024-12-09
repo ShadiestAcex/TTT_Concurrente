@@ -3,101 +3,6 @@ import threading
 import tkinter as tk
 from tkinter import messagebox
 
-def open_waiting_room(logged_in_users, username, client_socket):
-    waiting_room = tk.Toplevel(window)
-    waiting_room.title("Sala de Espera")
-    waiting_room.geometry("300x400")
-    waiting_room.configure(bg="#D8BFD8")
-
-    font_tlt = "Indie Flower"
-
-    label_waiting = tk.Label(waiting_room, text="Sala de Espera", bg="#D8BFD8", fg="black", font=(font_tlt, 20))
-    label_waiting.pack(pady=20)
-
-    users_frame = tk.Frame(waiting_room, bg="#D8BFD8")
-    users_frame.pack(pady=10, fill=tk.BOTH, expand=True)
-
-    def send_challenge(opponent):
-        client_socket.send(f"CHALLENGE,{opponent}".encode('utf-8'))
-
-    def update_user_list():
-        try:
-            client_socket.send("GET_USERS".encode('utf-8'))
-            response = client_socket.recv(1024).decode('utf-8')
-            if response.startswith("USERS"):
-                _, users = response.split(',', 1)
-                users = users.split(',')
-
-                for widget in users_frame.winfo_children():
-                    widget.destroy()
-
-                for user in users:
-                    if user != username:
-                        frame_user = tk.Frame(users_frame, bg="#D8BFD8")
-                        frame_user.pack(pady=5)
-                        label_user = tk.Label(frame_user, text=user, bg="#D8BFD8", fg="black", font=(font_tlt, 15))
-                        label_user.pack(side=tk.LEFT)
-                        button_challenge = tk.Button(
-                            frame_user,
-                            text="Retar",
-                            bg="#C99AF5",
-                            font=(font_tlt, 12),
-                            command=lambda u=user: send_challenge(u)
-                        )
-                        button_challenge.pack(side=tk.LEFT, padx=10)
-        except Exception as e:
-            print(f"Error actualizando la lista de usuarios: {e}")
-
-    def periodic_update():
-        update_user_list()
-        waiting_room.after(3000, periodic_update)
-
-    periodic_update()
-
-    def listen_for_messages():
-        while True:
-            try:
-                message = client_socket.recv(1024).decode('utf-8')
-                if not message:
-                    break
-
-                if message.startswith("CHALLENGE"):
-                    _, challenger = message.split(',')
-                    response = messagebox.askyesno("Desafío", f"{challenger} te ha retado. ¿Aceptar?")
-                    if response:
-                        client_socket.send(f"ACCEPT,{challenger}".encode('utf-8'))
-                        waiting_room.destroy()
-                        print("[DEBUG] Aceptando desafío. Este cliente NO es challenger.")
-                        open_cat_window(username, challenger, client_socket, is_challenger=False)
-                        return
-
-                    else:
-                        client_socket.send(f"DECLINE,{challenger}".encode('utf-8'))
-
-                elif message.startswith("ACCEPT"):
-                    _, opponent = message.split(',')
-                    messagebox.showinfo("Desafío aceptado", f"{opponent} ha aceptado tu desafío.")
-                    waiting_room.destroy()
-                    print("[DEBUG] Oponente aceptó. Este cliente ES challenger.")
-                    open_cat_window(username, opponent, client_socket, is_challenger=True)
-                    return
-
-                elif message.startswith("OPPONENT_DISCONNECTED"):
-                    messagebox.showinfo("Información", "El oponente se desconectó.")
-
-                elif message.startswith("DECLINE"):
-                    _, decliner = message.split(',')
-                    messagebox.showinfo("Información", f"{decliner} ha rechazado el desafío.")
-
-            except Exception as e:
-                print(f"Error en listen_for_messages: {e}")
-                break
-
-        print("Conexión cerrada.")
-
-    threading.Thread(target=listen_for_messages, daemon=True).start()
-
-
 def open_cat_window(username, opponent, client_socket, is_challenger):
     cat_window = tk.Toplevel(window)
     cat_window.title("Juego del Gato")
@@ -119,7 +24,10 @@ def open_cat_window(username, opponent, client_socket, is_challenger):
     print(f"[DEBUG] Entrando a open_cat_window() con is_challenger={is_challenger}, username={username}, opponent={opponent}")
 
     def regresar_menu():
-        client_socket.send("EXIT".encode('utf-8'))
+        try:
+            client_socket.send("EXIT".encode('utf-8'))
+        except Exception as e:
+            print(f"Error enviando mensaje de salida: {e}")
         cat_window.destroy()
         open_waiting_room([], username, client_socket)
 
@@ -135,17 +43,26 @@ def open_cat_window(username, opponent, client_socket, is_challenger):
                 cat_window.update()
 
                 print(f"[DEBUG] {username} hace un movimiento en {i},{j}. Turn symbol: {turn_symbol.get()}")
-                client_socket.send(f"MOVE,{i*3+j}".encode('utf-8'))
+                try:
+                    client_socket.send(f"MOVE,{i*3+j}".encode('utf-8'))
+                except Exception as e:
+                    print(f"Error enviando movimiento: {e}")
                 disable_board()
 
                 winner = check_winner()
                 if winner:
                     game_over.set(True)
                     round_winner = username if winner == turn_symbol.get() else opponent
-                    client_socket.send(f"ROUND_WINNER,{round_winner}".encode('utf-8'))
+                    try:
+                        client_socket.send(f"ROUND_WINNER,{round_winner}".encode('utf-8'))
+                    except Exception as e:
+                        print(f"Error enviando ganador de ronda: {e}")
                 elif '' not in board:
                     game_over.set(True)
-                    client_socket.send("ROUND_WINNER,Empate".encode('utf-8'))
+                    try:
+                        client_socket.send("ROUND_WINNER,Empate".encode('utf-8'))
+                    except Exception as e:
+                        print(f"Error enviando empate: {e}")
                 else:
                     # Ahora es turno del oponente
                     current_turn.set(f"Turno de: {opponent}")
@@ -198,7 +115,6 @@ def open_cat_window(username, opponent, client_socket, is_challenger):
             enable_board()
         else:
             disable_board()
-
 
     board_frame = tk.Frame(cat_window, bg="#D8BFD8")
     board_frame.pack(pady=20)
@@ -301,7 +217,81 @@ def open_cat_window(username, opponent, client_socket, is_challenger):
 
     threading.Thread(target=listen_for_moves, daemon=True).start()
 
+def open_waiting_room(logged_in_users, username, client_socket):
+    waiting_room = tk.Toplevel(window)
+    waiting_room.title("Sala de Espera")
+    waiting_room.geometry("300x400")
+    waiting_room.configure(bg="#D8BFD8")
 
+    font_tlt = "Indie Flower"
+
+    label_waiting = tk.Label(waiting_room, text="Sala de Espera", bg="#D8BFD8", fg="black", font=(font_tlt, 20))
+    label_waiting.pack(pady=20)
+
+    users_frame = tk.Frame(waiting_room, bg="#D8BFD8")
+    users_frame.pack(pady=10, fill=tk.BOTH, expand=True)
+
+    def send_challenge(opponent):
+        try:
+            client_socket.send(f"CHALLENGE,{opponent}".encode('utf-8'))
+        except Exception as e:
+            print(f"Error enviando desafío: {e}")
+
+    def update_user_list():
+        try:
+            client_socket.send("GET_USERS".encode('utf-8'))
+            response = client_socket.recv(1024).decode('utf-8')
+            if response.startswith("USERS"):
+                _, users = response.split(',', 1)
+                users = users.split(',')
+
+                for widget in users_frame.winfo_children():
+                    widget.destroy()
+
+                for user in users:
+                    if user != username:
+                        frame_user = tk.Frame(users_frame, bg="#D8BFD8")
+                        frame_user.pack(pady=5)
+                        label_user = tk.Label(frame_user, text=user, bg="#D8BFD8", fg="white", font=("Arial", 12))
+                        label_user.pack(side=tk.LEFT)
+                        button_challenge = tk.Button(
+                            frame_user,
+                            text="Retar",
+                            bg="#C99AF5",
+                            font=("Arial", 12),
+                            command=lambda u=user: send_challenge(u)
+                        )
+                        button_challenge.pack(side=tk.LEFT, padx=10)
+        except Exception as e:
+            print(f"Error actualizando la lista de usuarios: {e}")
+
+    def periodic_update():
+        update_user_list()
+        waiting_room.after(3000, periodic_update)
+
+    periodic_update()
+
+    def listen_for_messages():
+        while True:
+            try:
+                message = client_socket.recv(1024).decode('utf-8')
+                if not message:
+                    break
+
+                if message.startswith("CHALLENGE"):
+                    _, challenger = message.split(',')
+                    response = messagebox.askyesno("Desafío", f"{challenger} te ha retado. ¿Aceptar?")
+                    if response:
+                        client_socket.send(f"ACCEPT,{challenger}".encode('utf-8'))
+                        waiting_room.destroy()
+                        print("[DEBUG] Aceptando desafío. Este cliente NO es challenger.")
+                        open_cat_window(username, challenger, client_socket, is_challenger=False)
+                        return
+            except Exception as e:
+                print(f"Error recibiendo mensajes: {e}")
+                break
+
+    threading.Thread(target=listen_for_messages, daemon=True).start()
 
 def authenticate():
     username = entry_username.get()
@@ -310,7 +300,7 @@ def authenticate():
     if username and password:
         try:
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client_socket.connect(('localhost', 9999))
+            client_socket.connect(('192.168.1.100', 9999))  # Reemplaza con la IP del servidor
             client_socket.send(f"{username},{password}".encode('utf-8'))
             response = client_socket.recv(1024).decode('utf-8')
             if response.startswith("Autenticación exitosa"):
